@@ -12,10 +12,18 @@
  *   --no-notes   skip the notes step (the release then uses the generated commit list)
  *   --yes        do not pause for review after drafting (for scripts)
  *   --model <m>  model for the notes draft
+ *   --no-notify  do not tell the Duet3D PluginRepository about the release (see below)
+ *   --notify <m> how to notify it: auto (default), form or api - see notify-plugin-repository.mjs
+ *   --accept-terms  with --notify api: tick the repository's terms checkbox without asking
  *
  * Notes: unless the version already has a CHANGELOG.md section, one is drafted with Claude from the commits
  * since the previous tag (see draft-release-notes.mjs). You then get a chance to read and edit CHANGELOG.md
  * before anything is committed; it is committed together with the version bump.
+ *
+ * Notify: with --push, once the release workflow has published, a plugin that is listed in
+ * github.com/Duet3D/PluginRepository gets its "Plugin Updating" request prepared (the prefilled form opens
+ * in your browser). A plugin that is not listed, or whose listing is not yours, is skipped quietly. It can
+ * never fail the release. Run it later, or retry, with:  npm run release -- notify [version]
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -24,6 +32,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { readSection } from "./changelog-section.mjs";
 import { DraftError, draftForVersion, insertSection } from "./draft-release-notes.mjs";
+import { notifyRelease, parseCliArgs, reportResult } from "./notify-plugin-repository.mjs";
 import { LOW_TITLES_THRESHOLD, pickTitle } from "./release-title.mjs";
 
 export const VERSION_RE = /^\d+\.\d+\.\d+(-[\w.]+)?$/;
@@ -47,13 +56,16 @@ export function unexpectedChanges(porcelain) {
 }
 
 function parseArgs(argv) {
-	const out = { push: false, notes: true, yes: false, model: undefined, version: undefined };
+	const out = { push: false, notes: true, yes: false, model: undefined, version: undefined, notify: "auto", acceptTerms: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === "--push") out.push = true;
 		else if (a === "--no-notes") out.notes = false;
 		else if (a === "--yes") out.yes = true;
 		else if (a === "--model") out.model = argv[++i];
+		else if (a === "--no-notify") out.notify = "off";
+		else if (a === "--notify") out.notify = argv[++i];
+		else if (a === "--accept-terms") out.acceptTerms = true;
 		else if (!a.startsWith("-")) out.version ??= a;
 		else {
 			console.error(`Unknown option ${a}`);
@@ -65,6 +77,7 @@ function parseArgs(argv) {
 
 async function main() {
 	const dir = process.cwd();
+	if (process.argv[2] === "notify") return notifyCommand(dir, process.argv.slice(3));
 	const git = (args, stdio = "inherit") => execFileSync("git", args, { cwd: dir, stdio, encoding: "utf8" });
 	const args = parseArgs(process.argv.slice(2));
 
@@ -154,8 +167,30 @@ async function main() {
 		git(["push"]);
 		git(["push", "origin", tag]);
 		console.log("Pushed. CI will build the ZIP and publish the GitHub Release.");
+		if (args.notify !== "off") {
+			console.log("\nPluginRepository: checking whether this release should be announced ...");
+			try {
+				reportResult(await notifyRelease({ dir, tag, mode: args.notify, acceptTerms: args.acceptTerms }));
+			} catch (e) {
+				// Never fail a release that has already been pushed. The command to retry is in the message.
+				console.warn(`⚠️  Could not prepare the PluginRepository update: ${e.message}\n   Retry later with:  npm run release -- notify ${version}`);
+			}
+		}
 	} else {
 		console.log(`Not pushed. When ready:  git push && git push origin ${tag}`);
+		console.log("After the release is published:  npm run release -- notify   (announces it to the Duet3D PluginRepository if the plugin is listed)");
+	}
+}
+
+/** `npm run release -- notify [version] [options]`: the notification step on its own (to retry or run later). */
+async function notifyCommand(dir, argv) {
+	const args = parseCliArgs(argv);
+	const version = args.version ?? JSON.parse(readFileSync(join(dir, "plugin.json"), "utf8")).version;
+	try {
+		reportResult(await notifyRelease({ dir, tag: `v${version}`, ...args }));
+	} catch (e) {
+		console.error(e.message);
+		process.exit(1);
 	}
 }
 

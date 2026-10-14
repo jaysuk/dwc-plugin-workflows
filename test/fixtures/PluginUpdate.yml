@@ -1,0 +1,47 @@
+name: Plugin Updating
+description: Submit a new plugin for approval
+title: "[PluginUpdate]: "
+labels: [plugin-update]
+assignees:
+- chrishamm
+body:
+- type: markdown
+  attributes:
+    value: |
+      ## Checklist
+      ### Ensure that:
+      - you are requesting using the same account that the plugin was submitted with
+      - plugin is existing in the same GitHub repository
+      - plugin is already existing in [Duet3D Plugin Repository](https://github.com/Duet3D/PluginRepository/tree/master/src/plugins)
+      - markdown files are renamed (case-sensitive) as PLUGIN.md, README.md
+      - Check the content in markdown files against [an online md viewer](https://markdownlivepreview.com/) as sometimes, images might not be displayed correctly
+      - plugin manifest file size is below 16KB
+
+      ## Important Information
+      - If a PLUGIN.md file exists, it will be used as the homepage of your plugin; otherwise, README.md will be used
+      - Tags, keywords will be fetched from the plugin manifest(plugin.json)
+
+- type: input
+  id: PluginAbstract
+  attributes:
+    label: Summary
+    description: A summary of what your plugin does (Try to keep it below 75 characters)
+    placeholder: This plugin...
+  validations:
+    required: true
+- type: input
+  id: PluginID
+  attributes:
+    label: Plugin ID
+    description: ID of the plugin to be updated
+    placeholder: Plugin-id
+  validations:
+    required: true
+- type: checkboxes
+  id: AgreeTerms
+  attributes:
+    label: Terms and Conditions
+    description: By submitting, I confirm that it contains no malicious code and ads. [Policy](https://www.duet3d.com/page/terms-conditions)
+    options:
+      - label: I confirm that this plugin contains no malicious code and/nor ads.
+        required: true

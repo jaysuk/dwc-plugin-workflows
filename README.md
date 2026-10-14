@@ -41,7 +41,9 @@ npm run release -- 1.2.0 --push
 drafts the release notes (see below), pauses so you can read and edit `CHANGELOG.md`, bumps `plugin.json` and
 `package.json`, commits (notes included), tags `v1.2.0` and pushes - which publishes the release. Without
 `--push` it stops after tagging. `--no-notes` skips the draft (the release then uses the generated commit
-list); `--yes` skips the pause. The launcher keeps a cached copy of this repo at `v1` in
+list); `--yes` skips the pause. After the push, for a plugin listed in the Duet3D PluginRepository, it also
+prepares that repository's update request once the release is published (see
+[Announcing a release](#announcing-a-release-to-the-duet3d-pluginrepository); `--no-notify` skips it). The launcher keeps a cached copy of this repo at `v1` in
 `~/.cache/dwc-plugin-workflows`, refreshed on every run, so changes to the release flow reach every plugin
 without editing it. Set `DWC_PLUGIN_WORKFLOWS_DIR` to run a local checkout of this repo instead.
 
@@ -148,6 +150,46 @@ the footer, as before - releasing never depends on the draft step.
 
 When `dwc36` produces a package the footer automatically lists both downloads and carries a marker for each.
 
+## Announcing a release to the Duet3D PluginRepository
+
+Plugins listed in [Duet3D/PluginRepository](https://github.com/Duet3D/PluginRepository) only pick up a new
+release when someone files its **Plugin Updating** issue. `npm run release -- X.Y.Z --push` does that step
+for you: once the release workflow has published, it prepares the issue and opens the **prefilled update form**
+in your browser. You tick the terms and press Submit, and the repository's own automation takes it from there
+(it opens a PR, merges it and redeploys).
+
+```
+npm run release -- notify [version] [--dry-run] [--no-open] [--mode auto|form|api] [--accept-terms]
+```
+
+re-runs just that step (to retry, or when you released with `--no-notify`). `--dry-run` prints the issue it
+would file and changes nothing.
+
+It only acts when the issue would actually be accepted, and otherwise says why and moves on:
+
+- the plugin is **listed** in the repository, and the listing is **this repo's own** (same author and repository
+  name) and was **submitted by the signed-in `gh` user**: the repository rejects update requests from anyone
+  else. (So a fork that shares a name with someone else's listing is never notified.)
+- the version is **not a pre-release**, and the listing does not already show it, and there is no open issue for it;
+- the live update form still has the title, label and fields this script knows. If it has changed, nothing is
+  filed and the script says so.
+
+How the issue is made, and why it is a form rather than an API call: the repository's automation only runs if the
+`plugin-update` label is on the issue as it opens, and GitHub only applies labels from an issue form (or to people
+with triage access). An issue created through the API by an ordinary account silently loses its label and never
+triggers anything, so by default you get the prefilled form. If your account has triage or push access there, the
+script creates the issue directly, with the label; since that ticks the terms for you it asks first
+(or pass `--accept-terms`).
+
+Other things worth knowing:
+
+- The **Summary** field overwrites the listed abstract on every update, so the script re-sends the listing's
+  current abstract. Change it by editing the form before submitting.
+- The repository reads the **newest GitHub release** and its primary ZIP (the shortest-named non-`-srcmap` ZIP, so
+  `<id>-<v>.zip` is chosen over `<id>-<v>-dwc36.zip`), which is why the script waits for the release workflow first.
+- **Plugin ID** is the repository name, not the `plugin.json` id.
+- It never fails a release: any problem is printed with the command to retry.
+
 ## How an update reaches every plugin
 
 Plugins reference `@v1`, a floating tag. To change the workflow for everyone:
@@ -173,6 +215,7 @@ shared scripts (`scripts/`) itself.
   which older plugin workflows fetch by SHA; this copy is the one to edit going forward.
 - `scripts/release-notes.mjs` - assembles the release body; `changelog-section.mjs`, `release-title.mjs`,
   `release-footer.mjs` are its parts. All run with the plugin as the working directory.
+- `scripts/notify-plugin-repository.mjs` - announces a release to the Duet3D PluginRepository (run by `release.mjs`).
 - `scripts/draft-release-notes.mjs` - drafts a `CHANGELOG.md` section with Claude (run by you, locally).
 - `scripts/release.mjs` - the release command: notes, bump, commit, tag, push. `templates/release.mjs` is the
   launcher each plugin carries.
