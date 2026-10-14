@@ -190,6 +190,66 @@ Other things worth knowing:
 - **Plugin ID** is the repository name, not the `plugin.json` id.
 - It never fails a release: any problem is printed with the command to retry.
 
+## npm packages (the core libraries)
+
+`npm-release.yml` releases the family's npm packages (`dwc-gcode-core`, `dwc-gcode-editor`,
+`dwc-config-backup-core`, `dwc-plugin-runtime`, `dwc-plugin-test-kit`): **pushing a version tag tests the
+package, publishes it to npm and creates the GitHub Release**. In a package repo, `.github/workflows/release.yml`:
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write # npm trusted publishing; must be granted here as well as in the shared workflow
+
+jobs:
+  release:
+    uses: jaysuk/dwc-plugin-workflows/.github/workflows/npm-release.yml@v1
+```
+
+Then a release is: bump `version` in `package.json`, commit, `git tag vX.Y.Z && git push origin vX.Y.Z`. The
+workflow verifies the tag matches `package.json`, runs whichever of `typecheck`, `build` and `test` the package
+defines, publishes (a pre-release such as `1.2.0-rc.1` goes under the `next` dist-tag, not `latest`) and creates
+the GitHub Release (the version's `CHANGELOG.md` section if there is one, else the generated commit list, plus
+`npm install <name>@<version>` and the optional `.github/release-footer.md`; that file can use `{{name}}`,
+`{{version}}` and `{{pkg.some.path}}`). **Do not `npm publish` by hand any more.** If you do, CI sees the version is
+already on npm and skips its own publish.
+
+A manual run (Actions -> Release -> Run workflow) is a dry run: it tests and builds, shows exactly what
+`npm publish` would upload and the notes it would use, and publishes nothing. Re-running a tag whose publish worked
+but whose GitHub Release failed is safe; the already-published version is skipped.
+
+### One-time npm setup per package
+
+Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): no npm token is stored in
+GitHub. npm trusts one specific workflow in one repo, and attaches a provenance statement to every release.
+Needs your npm 2FA, so it cannot be done from CI:
+
+```
+npm trust github dwc-gcode-core          --file release.yml --repo jaysuk/dwc-gcode-core          --allow-publish
+npm trust github dwc-gcode-editor        --file release.yml --repo jaysuk/dwc-gcode-editor        --allow-publish
+npm trust github dwc-config-backup-core  --file release.yml --repo jaysuk/dwc-config-backup-core  --allow-publish
+npm trust github dwc-plugin-runtime      --file release.yml --repo jaysuk/dwc-plugin-runtime      --allow-publish
+npm trust github dwc-plugin-test-kit     --file release.yml --repo jaysuk/dwc-plugin-test-kit     --allow-publish
+```
+
+- `--file` is the **caller's** `release.yml` in the package repo, not `npm-release.yml` here.
+- npm does not validate the setting when it is saved; a mistake only shows as a failed publish.
+- **A new trust setting must be used for a successful publish within 2 days, or it expires.** Run `npm trust` when
+  you are about to tag a release, not weeks before. (`npm trust list <package>` shows what is set;
+  `npm trust revoke` removes one.)
+- Requirements: a public repo on GitHub-hosted runners, npm 11.5.1+ (the workflow checks and upgrades), and a
+  `repository` field in `package.json` pointing at the repo (the workflow checks this too; provenance cannot be
+  verified without it).
+- Once it has worked, consider *Settings -> Publishing access -> Require two-factor authentication and disallow
+  tokens* on each package (trusted publishers keep working; stored tokens stop), and revoke any old automation tokens.
+
 ## How an update reaches every plugin
 
 Plugins reference `@v1`, a floating tag. To change the workflow for everyone:
@@ -211,10 +271,12 @@ shared scripts (`scripts/`) itself.
 
 - `.github/workflows/release.yml` - the reusable release workflow (`workflow_call`).
 - `.github/workflows/ci.yml` - the reusable CI workflow.
+- `.github/workflows/npm-release.yml` - the reusable release workflow for the npm packages (test, publish, GitHub Release).
 - `scripts/changelog.mjs` - Conventional-Commit changelog. Also still published from `dwc-plugin-runtime`,
   which older plugin workflows fetch by SHA; this copy is the one to edit going forward.
 - `scripts/release-notes.mjs` - assembles the release body; `changelog-section.mjs`, `release-title.mjs`,
   `release-footer.mjs` are its parts. All run with the plugin as the working directory.
+- `scripts/package-release-notes.mjs` - the release body for an npm package (used by `npm-release.yml`).
 - `scripts/notify-plugin-repository.mjs` - announces a release to the Duet3D PluginRepository (run by `release.mjs`).
 - `scripts/draft-release-notes.mjs` - drafts a `CHANGELOG.md` section with Claude (run by you, locally).
 - `scripts/release.mjs` - the release command: notes, bump, commit, tag, push. `templates/release.mjs` is the

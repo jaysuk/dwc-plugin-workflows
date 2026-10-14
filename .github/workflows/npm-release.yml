@@ -1,0 +1,180 @@
+name: npm package release
+
+# Reusable release workflow for the npm packages of the DWC plugin family (dwc-gcode-core, dwc-gcode-editor,
+# dwc-config-backup-core, dwc-plugin-runtime, dwc-plugin-test-kit): pushing a version tag tests the package,
+# publishes it to npm and creates the GitHub Release. One copy, used by every package.
+#
+# In a package repo, .github/workflows/release.yml is just:
+#
+#   name: Release
+#   on:
+#     push: { tags: ["v*"] }
+#     workflow_dispatch:
+#   permissions:
+#     contents: write
+#     id-token: write
+#   jobs:
+#     release:
+#       uses: jaysuk/dwc-plugin-workflows/.github/workflows/npm-release.yml@v1
+#
+# Publishing uses npm "trusted publishing": no npm token is stored anywhere. npm trusts this exact workflow
+# run (via GitHub's OIDC token) and adds a provenance attestation to the package. One-time setup per package,
+# which needs your npm 2FA (see the README):
+#
+#   npm trust github <package> --file release.yml --repo jaysuk/<repo> --allow-publish
+#
+# NB: the file name npm is told is the CALLER's (release.yml in the package repo), not this file, and
+# `id-token: write` must be granted by the caller as well as here.
+#
+# Order matters: test -> npm publish -> GitHub Release. A re-run of the same tag is safe: a version that is
+# already on npm is skipped, so a failed Release step can simply be re-run.
+#
+# A manual run (Actions -> Release -> Run workflow) is a dry run: it tests, builds, shows what `npm publish`
+# would upload and the notes it would use, and publishes nothing.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: "26"
+      workflows-ref:
+        description: Ref of dwc-plugin-workflows to take the shared scripts from. Keep it equal to the ref in `uses:`.
+        type: string
+        default: v1
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # npm trusted publishing (OIDC) and provenance
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: pkg
+          fetch-depth: 0 # full history + tags so the changelog generator finds the previous tag
+          fetch-tags: true
+
+      - name: Checkout shared release scripts
+        uses: actions/checkout@v6
+        with:
+          repository: jaysuk/dwc-plugin-workflows
+          ref: ${{ inputs.workflows-ref }}
+          path: workflows
+
+      - uses: actions/setup-node@v6
+        with: { node-version: "${{ inputs.node-version }}" }
+
+      # Trusted publishing needs npm >= 11.5.1 (Node 22.14+).
+      - name: Check the npm version
+        run: |
+          need=11.5.1
+          have=$(npm --version)
+          if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
+            echo "npm $have is older than $need - upgrading"
+            npm install -g npm@latest
+          fi
+          npm --version
+
+      - name: Read package
+        id: pkg
+        working-directory: pkg
+        run: |
+          echo "name=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # The tag must match package.json, so a release can't publish a different version than it announces.
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: pkg
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "::error::Tag '$TAG' != package.json version '$VERSION'. Bump package.json and re-tag."
+            exit 1
+          fi
+
+      # npm refuses to build provenance if package.json does not point at the repo being built.
+      - name: Check the repository field matches this repo
+        working-directory: pkg
+        run: |
+          URL=$(node -p "const r=require('./package.json').repository; typeof r==='string'?r:(r&&r.url)||''")
+          case "$URL" in
+            *"github.com/${GITHUB_REPOSITORY}"*) ;;
+            *) echo "::error::package.json 'repository' ('$URL') must point at github.com/${GITHUB_REPOSITORY}, or npm cannot verify provenance."; exit 1 ;;
+          esac
+
+      - name: Install
+        working-directory: pkg
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      # Run whichever of these the package defines.
+      - name: Typecheck, build and test
+        working-directory: pkg
+        run: |
+          has() { node -e "process.exit((require('./package.json').scripts||{})['$1']?0:1)"; }
+          if has typecheck; then npm run typecheck; fi
+          if has build; then npm run build; fi
+          if has test; then npm test; fi
+
+      - name: Generate release notes
+        working-directory: pkg
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: node ../workflows/scripts/package-release-notes.mjs --version "v$VERSION" > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Is this version already on npm?
+        id: npm
+        env:
+          NAME: ${{ steps.pkg.outputs.name }}
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$NAME@$VERSION is already on npm - skipping the publish step."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm (tag push)
+        if: startsWith(github.ref, 'refs/tags/') && steps.npm.outputs.published != 'true'
+        working-directory: pkg
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          # No token: npm authenticates this run through GitHub's OIDC token (trusted publishing).
+          unset NODE_AUTH_TOKEN
+          # A pre-release must be published under an explicit dist-tag, not "latest".
+          case "$VERSION" in
+            *-*) npm publish --tag next ;;
+            *) npm publish ;;
+          esac
+
+      - name: Dry run - what npm publish would upload (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: pkg
+        run: |
+          {
+            echo "## Dry run: ${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}"
+            echo
+            echo "Already on npm: **${{ steps.npm.outputs.published }}**"
+            echo
+            echo '```'
+            npm publish --dry-run 2>&1
+            echo '```'
+            echo
+            echo "### Release notes"
+            echo
+            cat "$RUNNER_TEMP/release-notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release (tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: false
+          name: ${{ github.ref_name }}
+          body_path: ${{ runner.temp }}/release-notes.md
