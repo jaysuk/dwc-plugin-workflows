@@ -6,6 +6,6 @@
   "description": "Shared release workflow and scripts for the DuetWebControl plugin family.",
   "license": "MIT",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   }
 }
