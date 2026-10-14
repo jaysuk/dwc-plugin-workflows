@@ -71,7 +71,9 @@ export function buildFooter({ manifest, env = {}, has36 = false, extra = "" }) {
 		"",
 		built,
 	];
-	if (extra.trim()) lines.push(extra.trim());
+	// Quote lines continue the "Built against" quote; anything else (e.g. a heading + section) starts a new block.
+	const notes = extra.trim();
+	if (notes) lines.push(...(notes.startsWith(">") ? [] : [""]), notes);
 	lines.push("", ...markers.map((m) => `<!-- dwc-plugin-update ${JSON.stringify(m)} -->`), "");
 	return lines.join("\n");
 }

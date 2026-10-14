@@ -40,6 +40,11 @@ test("extra notes are appended before the marker, trimmed", () => {
 	assert.ok(out.indexOf("Needs the webcam bridge") < out.indexOf("<!-- dwc-plugin-update"));
 });
 
+test("extra notes that are not quote lines start their own block", () => {
+	const out = buildFooter({ manifest, env, extra: "### 🤸 Share it\nSome text." });
+	assert.match(out, /version\.\n\n### 🤸 Share it\nSome text\.\n\n<!-- dwc-plugin-update/);
+});
+
 test("the footer keeps the shape the update checker strips: --- then ### 📦 Install", () => {
 	const out = buildFooter({ manifest, env });
 	assert.match(out, /^---\n\n### 📦 Install\n/);
