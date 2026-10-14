@@ -143,15 +143,25 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') && steps.npm.outputs.published != 'true'
         working-directory: pkg
         env:
+          NAME: ${{ steps.pkg.outputs.name }}
           VERSION: ${{ steps.pkg.outputs.version }}
         run: |
           # No token: npm authenticates this run through GitHub's OIDC token (trusted publishing).
           unset NODE_AUTH_TOKEN
           # A pre-release must be published under an explicit dist-tag, not "latest".
           case "$VERSION" in
-            *-*) npm publish --tag next ;;
-            *) npm publish ;;
+            *-*) ARGS="--tag next" ;;
+            *) ARGS="" ;;
           esac
+          # npm swallows OIDC problems and just reports "need auth", so on failure show what its debug log says
+          # about the token exchange, and what to check.
+          if ! npm publish $ARGS; then
+            echo "::group::npm debug log: OIDC / auth lines"
+            grep -i -h "oidc\|token exchange\|trust\|ENEEDAUTH" "$HOME"/.npm/_logs/*.log | head -40 || true
+            echo "::endgroup::"
+            echo "::error::npm publish failed. If it says 'need auth', npm did not accept this run's OIDC token: check that 'npm trust list $NAME' shows GitHub Actions for ${GITHUB_REPOSITORY} with the workflow file of THIS repo's release.yml and publish allowed, and that it was used within 2 days of being created."
+            exit 1
+          fi
 
       # `npm pack --dry-run` lists exactly what the tarball would contain. (`npm publish --dry-run` is not used: it
       # refuses a version that is already on npm, which is the normal state when rehearsing the current release.)
