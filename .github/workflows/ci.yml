@@ -1,0 +1,96 @@
+name: DWC plugin CI
+
+# Reusable CI workflow for DuetWebControl (Vue 3) plugins: unit + mount tests, then a build and type-check
+# against a real DuetWebControl checkout. One copy, used by every plugin: when it changes here, every plugin
+# picks it up on its next CI run.
+#
+# In a plugin repo, .github/workflows/ci.yml is just:
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+#   jobs:
+#     test:
+#       uses: jaysuk/dwc-plugin-workflows/.github/workflows/ci.yml@v1
+#       with:
+#         dwc-ref: v3.7-dev
+#
+# The plugin's own dependencies (including dwc-plugin-test-kit, whose vitest config and `typecheck` /
+# `verify-build` commands it uses) come from its package.json, so there is nothing to pin here.
+#
+# What a plugin must provide: `npm test`, and `typecheck` and `verify-build` scripts. If it defines
+# `test:coverage`, that runs instead of `npm test`.
+
+on:
+  workflow_call:
+    inputs:
+      dwc-repo:
+        description: DuetWebControl repository to build/type-check against.
+        type: string
+        default: Duet3D/DuetWebControl
+      dwc-ref:
+        description: DuetWebControl branch/tag/sha.
+        type: string
+        default: v3.7-dev
+      node-version:
+        type: string
+        default: "26"
+
+jobs:
+  unit:
+    name: Unit + mount tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: plugin }
+      - uses: actions/setup-node@v6
+        with: { node-version: "${{ inputs.node-version }}", cache: npm, cache-dependency-path: plugin/package-lock.json }
+      - name: Install plugin
+        working-directory: plugin
+        run: npm install
+      - name: Run tests (with coverage if the plugin defines test:coverage)
+        working-directory: plugin
+        run: |
+          if [ "$(node -p "!!(require('./package.json').scripts||{})['test:coverage']")" = "true" ]; then
+            npm run test:coverage
+          else
+            npm test
+          fi
+
+  build-and-typecheck:
+    name: Build + type-check against DWC
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { path: plugin }
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.dwc-repo }}
+          ref: ${{ inputs.dwc-ref }}
+          path: DuetWebControl
+      - uses: actions/setup-node@v6
+        with: { node-version: "${{ inputs.node-version }}" }
+      - name: Install DuetWebControl
+        working-directory: DuetWebControl
+        run: npm install
+      - name: Install plugin (and its bundled deps into DWC for type-checking)
+        working-directory: plugin
+        run: |
+          npm install
+          # Install the plugin's runtime deps into DWC so vue-tsc can resolve them. Use each dep's
+          # package.json spec: the value for github:/url/path deps (a bare github-only name would 404
+          # on the npm registry), else name@version for registry deps.
+          SPECS=$(node -p "Object.entries(require('./package.json').dependencies||{}).map(([k,v])=>v.includes(':')||v.includes('/')?v:k+'@'+v).join(' ')")
+          if [ -n "$SPECS" ]; then (cd ../DuetWebControl && npm install --no-save $SPECS); fi
+      - name: Verify build (installable ZIP, correctly externalised)
+        working-directory: plugin
+        env:
+          DWC_DIR: ${{ github.workspace }}/DuetWebControl
+        run: npm run verify-build
+      - name: Type-check
+        working-directory: plugin
+        env:
+          DWC_DIR: ${{ github.workspace }}/DuetWebControl
+        run: npm run typecheck

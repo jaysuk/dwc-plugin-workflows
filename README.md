@@ -57,6 +57,36 @@ without editing it. Set `DWC_PLUGIN_WORKFLOWS_DIR` to run a local checkout of th
 - **Manual run**: the same build, but the ZIP is uploaded as a workflow artifact and the title and notes are
   printed to the run summary. Nothing is published, so this is the dry run to use after changing anything.
 
+## CI
+
+`ci.yml` is the shared CI: unit and mount tests, then a build and type-check against a real DuetWebControl
+checkout. In a plugin repo, `.github/workflows/ci.yml`:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    uses: jaysuk/dwc-plugin-workflows/.github/workflows/ci.yml@v1
+    with:
+      dwc-ref: v3.7-dev
+```
+
+Needs `npm test` plus `typecheck` and `verify-build` scripts (`test:coverage` is used instead of `npm test` when
+it exists). Inputs: `dwc-ref` (default `v3.7-dev`), `dwc-repo`, `node-version` (default `26`).
+
+Nothing is pinned per plugin: the plugin's own dependencies, including `dwc-plugin-test-kit` and the
+`typecheck` / `verify-build` commands it provides, come from its `package.json`. Bumping the kit is an ordinary
+dependency update, and a change to the CI itself is a new tag here.
+
+This replaces `dwc-plugin-test-kit`'s `dwc-plugin-ci.yml`, which needed the kit's version written twice in every
+plugin (`@vX` and `kit-ref`) and edited by hand in each repo for every change.
+
 ## Writing release notes
 
 Commit subjects make poor release notes, so draft proper ones before you release. From the plugin repo:
@@ -137,7 +167,8 @@ shared scripts (`scripts/`) itself.
 
 ## Layout
 
-- `.github/workflows/release.yml` - the reusable workflow (`workflow_call`).
+- `.github/workflows/release.yml` - the reusable release workflow (`workflow_call`).
+- `.github/workflows/ci.yml` - the reusable CI workflow.
 - `scripts/changelog.mjs` - Conventional-Commit changelog. Also still published from `dwc-plugin-runtime`,
   which older plugin workflows fetch by SHA; this copy is the one to edit going forward.
 - `scripts/release-notes.mjs` - assembles the release body; `changelog-section.mjs`, `release-title.mjs`,
