@@ -221,8 +221,8 @@ the GitHub Release (the version's `CHANGELOG.md` section if there is one, else t
 `{{version}}` and `{{pkg.some.path}}`). **Do not `npm publish` by hand any more.** If you do, CI sees the version is
 already on npm and skips its own publish.
 
-A manual run (Actions -> Release -> Run workflow) is a dry run: it tests and builds, shows exactly what
-`npm publish` would upload and the notes it would use, and publishes nothing. Re-running a tag whose publish worked
+A manual run (Actions -> Release -> Run workflow) is a dry run: it tests and builds, lists what
+the npm tarball would contain and the notes it would use, and publishes nothing. Re-running a tag whose publish worked
 but whose GitHub Release failed is safe; the already-published version is skipped.
 
 ### One-time npm setup per package
