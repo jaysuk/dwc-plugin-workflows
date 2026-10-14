@@ -1,0 +1,45 @@
+name: Release
+
+# Releasing this repo = pushing a semver tag:
+#
+#   git tag v1.2.0 && git push origin v1.2.0
+#
+# This publishes a GitHub Release for it and moves the floating major tag (v1) to the same commit.
+# Plugins reference `...release.yml@v1`, so moving v1 is what rolls a change out to every plugin on its
+# next release. A breaking change is a new major (v2): plugins then opt in by changing @v1 to @v2.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v6
+        with: { node-version: 24 }
+
+      - run: npm test
+
+      - name: Move the floating major tag
+        run: |
+          MAJOR="${GITHUB_REF_NAME%%.*}"
+          git tag -f "$MAJOR" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$MAJOR"
+
+      - name: Generate release notes
+        run: node scripts/changelog.mjs > "$RUNNER_TEMP/notes.md"
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          body_path: ${{ runner.temp }}/notes.md

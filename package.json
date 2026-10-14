@@ -1,0 +1,11 @@
+{
+  "name": "dwc-plugin-workflows",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared release workflow and scripts for the DuetWebControl plugin family.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}
