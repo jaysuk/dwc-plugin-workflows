@@ -29,7 +29,21 @@ jobs:
       dwc-ref: ${{ inputs.dwc-ref }}
 ```
 
-Releasing is then `npm run release -- 1.2.0 --push` (bump + commit + tag + push), exactly as before.
+### Releasing
+
+Copy [templates/release.mjs](templates/release.mjs) to `scripts/release.mjs` (it is identical in every plugin
+and never changes) and have `package.json` say `"release": "node scripts/release.mjs"`. Then:
+
+```
+npm run release -- 1.2.0 --push
+```
+
+drafts the release notes (see below), pauses so you can read and edit `CHANGELOG.md`, bumps `plugin.json` and
+`package.json`, commits (notes included), tags `v1.2.0` and pushes - which publishes the release. Without
+`--push` it stops after tagging. `--no-notes` skips the draft (the release then uses the generated commit
+list); `--yes` skips the pause. The launcher keeps a cached copy of this repo at `v1` in
+`~/.cache/dwc-plugin-workflows`, refreshed on every run, so changes to the release flow reach every plugin
+without editing it. Set `DWC_PLUGIN_WORKFLOWS_DIR` to run a local checkout of this repo instead.
 
 ### What it does
 
@@ -56,7 +70,10 @@ notes (for tone) to the Claude Code CLI - text only, no tools - and writes the r
 `## [1.3.0] - <date>`. Then:
 
 1. Read it and edit it. It is a draft: check the claims against what you know shipped.
-2. Commit `CHANGELOG.md` (the release script refuses a dirty tree), then `npm run release -- 1.3.0 --push`.
+2. Release as usual: `npm run release` reuses the section and commits it with the version bump.
+
+`npm run release` does the drafting for you when the version has no section yet; run this script by hand only
+to draft ahead of time or to redo a draft (`--force`).
 
 Options: `--print` (show the draft, write nothing), `--force` (replace an existing section), `--since <tag>`,
 `--model <id>`, `--prompt-only` (show what would be sent). It warns if the draft uses formatting the in-app
@@ -83,6 +100,7 @@ the footer, as before - releasing never depends on the draft step.
 |---|---|
 | `plugin.json` | `id`, `version`, `name`, `dwcVersion`. The ZIP name, assets and footer are all derived from these. |
 | `package.json` | `typecheck` and `verify-build` scripts. |
+| `scripts/release.mjs` | The launcher from `templates/release.mjs`, behind `npm run release`. |
 | `scripts/release-titles.txt` | The puns, one per line. The workflow warns when five or fewer are unused. |
 | `.github/release-footer.md` *(optional)* | Extra lines appended to the footer: where to find the plugin, hardware requirements, companion plugins. |
 | `release:prepare` npm script *(optional)* | Runs before packaging, for release-only asset fetches (e.g. OpenCV.js). |
@@ -125,4 +143,6 @@ shared scripts (`scripts/`) itself.
 - `scripts/release-notes.mjs` - assembles the release body; `changelog-section.mjs`, `release-title.mjs`,
   `release-footer.mjs` are its parts. All run with the plugin as the working directory.
 - `scripts/draft-release-notes.mjs` - drafts a `CHANGELOG.md` section with Claude (run by you, locally).
+- `scripts/release.mjs` - the release command: notes, bump, commit, tag, push. `templates/release.mjs` is the
+  launcher each plugin carries.
 - `test/` - `npm test`.

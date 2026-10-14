@@ -257,20 +257,21 @@ function parseArgs(argv) {
 	return out;
 }
 
-function main() {
-	const { flags, values, positional } = parseArgs(process.argv.slice(2));
-	const dir = process.cwd();
+export class DraftError extends Error {}
+
+/**
+ * Draft release notes for `version` in the plugin repo `dir`. Returns the draft body (cleaned), lint warnings,
+ * and what it was based on. Throws DraftError for expected problems (no commits, no CLI, CLI failure).
+ * With `promptOnly` it returns the prompt instead of calling Claude.
+ */
+export function draftForVersion(dir, version, { since: sinceOverride, model, promptOnly = false, onStatus = () => {} } = {}) {
 	const manifest = JSON.parse(readFileSync(join(dir, "plugin.json"), "utf8"));
-	const version = (positional[0] || manifest.version).replace(/^v/, "");
 
 	const tags = git(["tag", "-l", "v*"], dir).split("\n");
-	const since = values.since || previousTag(tags, version);
+	const since = sinceOverride || previousTag(tags, version);
 	const range = since ? `${since}..HEAD` : "HEAD";
 	const commits = parseLog(git(["log", range, "--no-merges", "--pretty=format:%h%x1f%s%x1f%b%x1e"], dir));
-	if (!commits.length) {
-		console.error(`No release-worthy commits in ${range} - nothing to write notes about.`);
-		process.exit(1);
-	}
+	if (!commits.length) throw new DraftError(`No release-worthy commits in ${range} - nothing to write notes about.`);
 	const diffStat = since ? git(["diff", "--stat", `${since}..HEAD`], dir) : "";
 
 	const changelogFile = join(dir, "CHANGELOG.md");
@@ -287,41 +288,52 @@ function main() {
 		diffStat,
 		previousNotes,
 	});
-
-	if (flags.has("prompt-only")) {
-		process.stdout.write(`--- SYSTEM ---\n${SYSTEM_PROMPT}\n\n--- USER ---\n${prompt}\n`);
-		return;
-	}
+	if (promptOnly) return { prompt, since, commitCount: commits.length };
 
 	const claude = findClaude();
-	if (!claude) {
-		console.error("Could not find the Claude Code CLI. Put `claude` on PATH or set CLAUDE_BIN to its full path.");
-		process.exit(1);
-	}
-	console.error(`Drafting notes for v${version} from ${commits.length} commit(s) since ${since || "the start"} ...`);
+	if (!claude) throw new DraftError("Could not find the Claude Code CLI. Put `claude` on PATH or set CLAUDE_BIN to its full path.");
+	onStatus(`Drafting notes for v${version} from ${commits.length} commit(s) since ${since || "the start"} ...`);
 
-	let draft;
+	let body;
 	try {
-		draft = cleanDraft(runClaude(claude, prompt, values.model));
+		body = cleanDraft(runClaude(claude, prompt, model));
+	} catch (e) {
+		throw new DraftError(e.message);
+	}
+	return { body, warnings: lintNotes(body), since, commitCount: commits.length };
+}
+
+function main() {
+	const { flags, values, positional } = parseArgs(process.argv.slice(2));
+	const dir = process.cwd();
+	const manifest = JSON.parse(readFileSync(join(dir, "plugin.json"), "utf8"));
+	const version = (positional[0] || manifest.version).replace(/^v/, "");
+
+	try {
+		const r = draftForVersion(dir, version, {
+			since: values.since,
+			model: values.model,
+			promptOnly: flags.has("prompt-only"),
+			onStatus: (m) => console.error(m),
+		});
+		if (flags.has("prompt-only")) {
+			process.stdout.write(`--- SYSTEM ---\n${SYSTEM_PROMPT}\n\n--- USER ---\n${r.prompt}\n`);
+			return;
+		}
+		if (flags.has("print")) {
+			process.stdout.write(r.body + "\n");
+		} else {
+			const changelogFile = join(dir, "CHANGELOG.md");
+			const changelog = existsSync(changelogFile) ? readFileSync(changelogFile, "utf8") : "";
+			const date = new Date().toISOString().slice(0, 10);
+			writeFileSync(changelogFile, insertSection(changelog, version, date, r.body, { force: flags.has("force") }));
+			console.error(`Wrote the v${version} section to CHANGELOG.md. Review and edit it, commit it, then release.`);
+		}
+		for (const w of r.warnings) console.error(`⚠️  ${w}`);
 	} catch (e) {
 		console.error(e.message);
 		process.exit(1);
 	}
-	const warnings = lintNotes(draft);
-
-	if (flags.has("print")) {
-		process.stdout.write(draft + "\n");
-	} else {
-		const date = new Date().toISOString().slice(0, 10);
-		try {
-			writeFileSync(changelogFile, insertSection(changelog, version, date, draft, { force: flags.has("force") }));
-		} catch (e) {
-			console.error(e.message);
-			process.exit(1);
-		}
-		console.error(`Wrote the v${version} section to CHANGELOG.md. Review and edit it, commit it, then release.`);
-	}
-	for (const w of warnings) console.error(`⚠️  ${w}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
