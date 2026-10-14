@@ -57,8 +57,9 @@ const commitLink = (hash) => (repoUrl ? `([\`${hash}\`](${repoUrl}/commit/${hash
 
 // --- Commit range: previous tag → HEAD ------------------------------------------------------------
 // When the workflow checks out a tag, HEAD is that tag's commit, so HEAD^ resolves the *previous*
-// release tag. No previous tag → whole history.
-const prevTag = git(["describe", "--tags", "--abbrev=0", "HEAD^"]);
+// release tag. No previous tag → whole history. Only `v<digit>...` tags count as releases: a repo may carry
+// other tags (dwc-gcode-core has `rrf-<tag>` markers) that would otherwise be taken for the previous release.
+const prevTag = git(["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD^"]);
 const range = prevTag ? `${prevTag}..HEAD` : "HEAD";
 const thisTag = flag("--version") || process.env.GITHUB_REF_NAME || "";
 
