@@ -48,7 +48,7 @@ on:
         default: ""
       node-version:
         type: string
-        default: "24"
+        default: "26"
       workflows-ref:
         description: Ref of dwc-plugin-workflows to take the shared scripts from. Keep it equal to the ref in `uses:`.
         type: string

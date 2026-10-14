@@ -95,7 +95,7 @@ the footer, as before - releasing never depends on the draft step.
 | `dwc-ref` | `v3.7-dev` | DuetWebControl ref for the 3.7 build. Pass `${{ inputs.dwc-ref }}`; empty means the default. |
 | `dwc36` | `false` | Also build a DWC 3.6 package, attached to the same release as `<id>-<version>-dwc36.zip`. Needs `scripts/stage-dwc36.mjs`, and is skipped while `src/ui36` does not exist. |
 | `dwc36-ref` | `v3.6-dev` | DuetWebControl ref for the 3.6 build. |
-| `node-version` | `24` | |
+| `node-version` | `26` | Node major for the build. |
 | `workflows-ref` | `v1` | Ref this repo's scripts are taken from. Keep equal to the ref in `uses:`. |
 
 When `dwc36` produces a package the footer automatically lists both downloads and carries a marker for each.
