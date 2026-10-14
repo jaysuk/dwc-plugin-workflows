@@ -96,3 +96,24 @@ test("when notes cannot be drafted it stops before changing anything and points 
 	assert.equal(JSON.parse(readFileSync(join(dir, "plugin.json"), "utf8")).version, "1.0.0"); // untouched
 	assert.equal(git("tag", "-l").trim(), "");
 });
+
+test("already at the version (first release of a scaffolded version): tags the current commit, no empty commit", () => {
+	const { dir, git } = repo();
+	const before = git("rev-parse", "HEAD").trim();
+	const r = run(dir, "1.0.0", "--no-notes");
+	assert.equal(r.status, 0, r.stderr);
+	assert.match(r.stdout, /already at 1\.0\.0/);
+	assert.match(r.stdout, /Tagged the current commit as v1\.0\.0/);
+	assert.equal(git("rev-parse", "HEAD").trim(), before); // no new commit
+	assert.equal(git("rev-list", "-n", "1", "v1.0.0").trim(), before);
+	assert.equal(git("cat-file", "-t", "v1.0.0").trim(), "tag");
+});
+
+test("already at the version but with a new CHANGELOG.md section: commits just the notes", () => {
+	const { dir, git } = repo({ changelog: "# Changelog\n" });
+	writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n## [1.0.0] - 2026-10-14\n\nFirst.\n");
+	const r = run(dir, "1.0.0", "--yes");
+	assert.equal(r.status, 0, r.stderr);
+	assert.equal(git("log", "-1", "--pretty=%s").trim(), "chore(release): v1.0.0");
+	assert.equal(git("show", "--name-only", "--pretty=", "HEAD").trim(), "CHANGELOG.md");
+});

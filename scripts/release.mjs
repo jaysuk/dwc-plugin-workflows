@@ -118,14 +118,29 @@ async function main() {
 	}
 
 	// --- Bump, commit, tag --------------------------------------------------------------------------
-	const bumped = ["plugin.json", "package.json"].filter((f) => existsSync(join(dir, f)));
-	for (const f of bumped) writeFileSync(join(dir, f), bumpManifest(readFileSync(join(dir, f), "utf8"), version));
-	console.log(`Bumped ${bumped.join(" + ")} -> ${version}`);
+	// Bump only what differs: a repo cutting the first release of the version it was scaffolded at already
+	// has both files at that version, and then there may be nothing to commit - just tag the current commit.
+	const bumped = ["plugin.json", "package.json"].filter((f) => {
+		if (!existsSync(join(dir, f))) return false;
+		const text = readFileSync(join(dir, f), "utf8");
+		if (JSON.parse(text).version === version) return false;
+		writeFileSync(join(dir, f), bumpManifest(text, version));
+		return true;
+	});
+	if (bumped.length) console.log(`Bumped ${bumped.join(" + ")} -> ${version}`);
+	else console.log(`plugin.json${existsSync(join(dir, "package.json")) ? " + package.json are" : " is"} already at ${version}.`);
 
 	git(["add", ...bumped, ...(existsSync(changelogFile) ? ["CHANGELOG.md"] : [])]);
-	git(["commit", "-m", `chore(release): ${tag}`]);
+	let staged = true;
+	try {
+		git(["diff", "--cached", "--quiet"], "pipe");
+		staged = false; // exit 0: nothing staged
+	} catch {
+		/* exit 1: there are staged changes */
+	}
+	if (staged) git(["commit", "-m", `chore(release): ${tag}`]);
 	git(["tag", "-a", tag, "-m", `${manifest.name || manifest.id} ${tag}`]);
-	console.log(`Committed and tagged ${tag}`);
+	console.log(`${staged ? "Committed and tagged" : "Tagged the current commit as"} ${tag}`);
 
 	const t = pickTitle(version, { dir });
 	console.log(`Release title: ${t.label}`);
